@@ -72,20 +72,26 @@ export default class HomeKitDeviceLightBulb extends HomeKitDevice {
         C,
         async (partial: { hue?: number; saturation?: number }, context: DescriptorContext) => {
           Object.assign(this.pendingHSV, partial);
+          const currentHue = this.kasaDevice.sys_info.hsv?.hue ?? 0;
+          const currentSat = this.kasaDevice.sys_info.hsv?.saturation ?? 0;
+          const nextHue = this.pendingHSV.hue ?? currentHue;
+          const nextSat = this.pendingHSV.saturation ?? currentSat;
+          const nextHSV = { hue: nextHue, saturation: nextSat };
+
+          // Keep Homebridge/Home UI in sync while the HSV update is debounced.
+          context.device.hsv = nextHSV;
+          this.kasaDevice.sys_info.hsv = nextHSV;
+
           if (this.hsvFlushTimer) {
             clearTimeout(this.hsvFlushTimer);
           }
           const host = context.device.host;
-          const baseHue = this.kasaDevice.sys_info.hsv?.hue ?? 0;
-          const baseSat = this.kasaDevice.sys_info.hsv?.saturation ?? 0;
 
           this.hsvFlushTimer = setTimeout(async () => {
-            const hue = this.pendingHSV.hue ?? baseHue;
-            const saturation = this.pendingHSV.saturation ?? baseSat;
+            const hue = this.pendingHSV.hue ?? nextHue;
+            const saturation = this.pendingHSV.saturation ?? nextSat;
             try {
               await this.deviceManager!.controlDevice(host, 'hsv', { hue, saturation });
-              context.device.hsv = { hue, saturation };
-              this.kasaDevice.sys_info.hsv = { hue, saturation };
             } catch (error) {
               this.log.error('HSV flush error', error);
             } finally {
