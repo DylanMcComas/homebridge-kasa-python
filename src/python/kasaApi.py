@@ -410,14 +410,38 @@ async def handle_fan_speed_level(target: Device, action: str, value: int):
 async def handle_hsv(target: Device, action: str, feature: str, value: dict):
     log(f"Handling HSV: action={action}, feature={feature}, value={value}", alias=target.alias)
     light = target.modules.get(Module.Light)
-    hsv = light.hsv
-    h = value.get("hue", hsv[0])
-    s = value.get("saturation", hsv[1])
-    v = hsv[2]
-    hsv[0] = max(0, min(h, 360))
-    hsv[1] = max(0, min(s, 100))
-    hsv[2] = max(0, min(v, 100))
-    await getattr(light, action)(*hsv)
+
+    # Optional but helps when HomeKit sends rapid separate Hue/Sat updates:
+    # await target.update()
+
+    cur = light.hsv  # immutable
+    cur_h, cur_s, cur_v = cur[0], cur[1], cur[2]
+
+    # HomeKit typically sends hue/saturation separately; keep the other from current state
+    h = value.get("hue", cur_h)
+    s = value.get("saturation", cur_s)
+    v = cur_v
+
+    # If value is 0 but the bulb is on, pick a sane nonzero "value" so color changes actually show
+    if (v is None) or (v == 0 and not target.is_off):
+        try:
+            if light.has_feature("brightness"):
+                v = max(1, int(light.brightness))
+            else:
+                v = 100
+        except Exception:
+            v = 100
+
+    # Clamp + coerce
+    new_h = int(max(0, min(float(h), 360)))
+    new_s = int(max(0, min(float(s), 100)))
+    new_v = int(max(0, min(float(v), 100)))
+
+    await getattr(light, action)(new_h, new_s, new_v)
+
+    # Mirror the brightness handler behavior: ensure it's on if a nonzero setting was requested
+    if target.is_off:
+        await target.turn_on()
 
 @app.route('/discover', methods=['POST'])
 async def discover_route():
